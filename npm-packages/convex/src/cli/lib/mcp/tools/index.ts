@@ -6,6 +6,7 @@ import { TablesTool } from "./tables.js";
 import { DataTool } from "./data.js";
 import { StatusTool } from "./status.js";
 import { FunctionSpecTool } from "./functionSpec.js";
+import { FunctionSourceTool } from "./functionSource.js";
 import { RunTool } from "./run.js";
 import { EnvListTool, EnvGetTool, EnvSetTool, EnvRemoveTool } from "./env.js";
 import { RunOneoffQueryTool } from "./runOneoffQuery.js";
@@ -35,6 +36,7 @@ export const convexTools: ConvexTool<any, any>[] = [
   DataTool,
   TablesTool,
   FunctionSpecTool,
+  FunctionSourceTool,
   RunTool,
   EnvListTool,
   EnvGetTool,
