@@ -30,8 +30,7 @@ Accepts either:
 - Module path: "messages.js", "lib/helpers.js"
 - Function identifier: "messages:send", "lib/helpers:formatDate"
 
-When a function is specified, returns the full module source with the line number
-where that function starts.
+When a function is specified, returns only that function's source code.
 
 Returns null source with a reason if source is unavailable (e.g., generated modules).
 `.trim();
@@ -44,6 +43,74 @@ type Module = {
   }>;
   sourcePackageId: string;
 };
+
+/**
+ * Extract a function from source code given the handler's line number.
+ *
+ * The lineno from the API points to the `handler:` line inside the function,
+ * not the outer `export const fn = query({` definition. We search backwards
+ * to find the actual start, then forwards to find the matching close.
+ *
+ * Returns the extracted source and the actual start line number (1-indexed).
+ */
+function extractFunction(
+  source: string,
+  handlerLine: number,
+): { source: string; startLine: number } {
+  const lines = source.split("\n");
+  // Lines are 1-indexed, array is 0-indexed
+  const handlerIndex = handlerLine - 1;
+
+  if (handlerIndex < 0 || handlerIndex >= lines.length) {
+    return { source, startLine: 1 };
+  }
+
+  // Search backwards from handler line to find the function definition start.
+  // Look for patterns like `export const fn = query({` or `export default query({`
+  let startIndex = handlerIndex;
+  for (let i = handlerIndex; i >= 0; i--) {
+    const line = lines[i];
+    // Match export const/let/var, or export default, followed by query/mutation/action/etc
+    if (
+      /^\s*export\s+(const|let|var|default)\s/.test(line) ||
+      /^\s*(const|let|var)\s+\w+\s*=\s*(query|internalQuery|mutation|internalMutation|action|internalAction|httpAction)\s*\(/.test(
+        line,
+      )
+    ) {
+      startIndex = i;
+      break;
+    }
+  }
+
+  // Now count braces from startIndex to find the end
+  let braceCount = 0;
+  let foundStart = false;
+
+  for (let i = startIndex; i < lines.length; i++) {
+    const line = lines[i];
+
+    for (const char of line) {
+      if (char === "{") {
+        braceCount++;
+        foundStart = true;
+      } else if (char === "}") {
+        braceCount--;
+        if (foundStart && braceCount === 0) {
+          return {
+            source: lines.slice(startIndex, i + 1).join("\n"),
+            startLine: startIndex + 1, // Convert back to 1-indexed
+          };
+        }
+      }
+    }
+  }
+
+  // If we didn't find a matching close brace, return from start to end
+  return {
+    source: lines.slice(startIndex).join("\n"),
+    startLine: startIndex + 1,
+  };
+}
 
 export const FunctionSourceTool: ConvexTool<
   typeof inputSchema,
@@ -148,9 +215,16 @@ export const FunctionSourceTool: ConvexTool<
       };
     }
 
-    return {
-      source,
-      ...(lineno !== undefined ? { lineno } : {}),
-    };
+    // If a specific function was requested and we have its line number,
+    // extract just that function's source
+    if (functionName && lineno !== undefined) {
+      const extracted = extractFunction(source, lineno);
+      return {
+        source: extracted.source,
+        lineno: extracted.startLine,
+      };
+    }
+
+    return { source };
   },
 };
