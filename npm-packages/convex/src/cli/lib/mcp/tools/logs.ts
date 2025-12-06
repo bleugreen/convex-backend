@@ -6,41 +6,33 @@ import { deploymentFetch } from "../../utils/utils.js";
 import { FunctionExecution } from "../../apiTypes.js";
 import { formatLogsAsText } from "../../logs.js";
 
+const LOG_LEVELS = ["DEBUG", "LOG", "INFO", "WARN", "ERROR"] as const;
+type LogLevel = (typeof LOG_LEVELS)[number];
+
 const inputSchema = z.object({
-  deploymentSelector: z
-    .string()
-    .describe("Deployment selector (from the status tool) to read logs from."),
-  cursor: z
-    .number()
-    .optional()
-    .describe(
-      "Optional cursor (in ms) to start reading from. Use 0 to read from the beginning.",
-    ),
-  entriesLimit: z
+  limit: z
     .number()
     .int()
     .positive()
     .max(1000)
     .optional()
-    .describe(
-      "Maximum number of log entries to return (from the end). If omitted, returns all available in this chunk.",
-    ),
-  tokensLimit: z
-    .number()
-    .int()
-    .positive()
-    .default(20000)
+    .describe("Maximum number of log entries to return. Defaults to 20."),
+  level: z
+    .enum(LOG_LEVELS)
     .optional()
     .describe(
-      "Approximate maximum number of tokens to return (applied to the JSON payload). Defaults to 20000.",
+      "Filter to entries with logs at or above this level. E.g., 'ERROR' shows only errors, 'WARN' shows warnings and errors.",
     ),
-  jsonl: z
-    .boolean()
-    .default(false)
+  function: z
+    .string()
     .optional()
     .describe(
-      "If true, return raw log entries as JSONL. If false (default), return formatted text logs.",
+      "Filter to functions matching this pattern (regex). E.g., 'messages:' or 'api/.*'",
     ),
+  deployment: z
+    .enum(["dev", "prod"])
+    .optional()
+    .describe("Target deployment: 'dev' or 'prod'. Defaults to 'dev'."),
 });
 
 const outputSchema = z.object({
@@ -54,10 +46,10 @@ const logsResponseSchema = z.object({
 });
 
 const description = `
-Fetch a chunk of recent log entries from your Convex deployment.
+Fetch recent log entries from your Convex deployment.
 
-Returns a batch of UDF execution log entries and a new cursor you can use to
-request the next batch. This tool does not tail; it performs a single fetch.
+Returns formatted UDF execution logs and a cursor for pagination.
+Use the cursor to fetch the next batch of logs.
 `.trim();
 
 export const LogsTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
@@ -66,9 +58,7 @@ export const LogsTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
   inputSchema,
   outputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = await ctx.decodeDeploymentSelector(
-      args.deploymentSelector,
-    );
+    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
     process.chdir(projectDir);
     const deploymentSelection = await getDeploymentSelection(ctx, ctx.options);
     const credentials = await loadSelectedDeploymentCredentials(
@@ -82,8 +72,8 @@ export const LogsTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
       adminKey: credentials.adminKey,
     });
 
-    const cursor = args.cursor ?? 0;
-    const response = await fetch(`/api/stream_function_logs?cursor=${cursor}`, {
+    // Fetch the full log buffer
+    const response = await fetch(`/api/stream_function_logs?cursor=0`, {
       method: "GET",
     });
 
@@ -99,69 +89,80 @@ export const LogsTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
       .json()
       .then(logsResponseSchema.parse);
 
-    const limitedEntries = limitLogs({
-      entries,
-      tokensLimit: args.tokensLimit ?? 20000,
-      entriesLimit: args.entriesLimit ?? entries.length,
-    });
-
-    if (args.jsonl) {
-      return {
-        entries: limitedEntries
-          .map((entry) => JSON.stringify(entry))
-          .join("\n"),
-        newCursor,
-      };
+    // Build function pattern filter
+    let functionPattern: RegExp | null = null;
+    if (args.function) {
+      try {
+        functionPattern = new RegExp(args.function);
+      } catch {
+        return await ctx.crash({
+          exitCode: 1,
+          errorType: "fatal",
+          printedMessage: `Invalid regex pattern: ${args.function}`,
+        });
+      }
     }
 
+    // Filter entries and their log lines
+    const filtered: FunctionExecution[] = [];
+    for (const entry of entries as FunctionExecution[]) {
+      // Filter by function pattern
+      if (functionPattern && !functionPattern.test(entry.identifier)) {
+        continue;
+      }
+
+      // Filter by log level
+      if (args.level) {
+        const filteredEntry = filterEntryByLevel(entry, args.level);
+        if (filteredEntry) {
+          filtered.push(filteredEntry);
+        }
+      } else {
+        filtered.push(entry);
+      }
+    }
+
+    // Take the last N entries (most recent)
+    const limit = args.limit ?? 20;
+    const limited = filtered.slice(-limit);
+
     return {
-      entries: formatLogsAsText(limitedEntries),
+      entries: formatLogsAsText(limited, true),
       newCursor,
     };
   },
 };
 
-export function limitLogs({
-  entries,
-  tokensLimit,
-  entriesLimit,
-}: {
-  entries: FunctionExecution[];
-  tokensLimit: number;
-  entriesLimit: number;
-}): FunctionExecution[] {
-  // 1) Apply entries limit first so we cut off neatly at entry boundaries (latest entries kept)
-  const limitedByEntries = entries.slice(entries.length - entriesLimit);
+/**
+ * Filter an entry to only include log lines at or above the specified level.
+ * Returns the filtered entry, or null if no matching content.
+ * Level hierarchy: DEBUG < LOG < INFO < WARN < ERROR
+ */
+function filterEntryByLevel(
+  entry: FunctionExecution,
+  minLevel: LogLevel,
+): FunctionExecution | null {
+  const levelIndex = LOG_LEVELS.indexOf(minLevel);
+  const hasError = "error" in entry && entry.error;
+  const errorMatches = hasError && levelIndex <= LOG_LEVELS.indexOf("ERROR");
 
-  // 2) Apply token limit by iterating over log lines from newest to oldest and
-  //    only include lines while within token budget. We cut off at the nearest log line.
-  const limitedByTokens = limitEntriesByTokenBudget({
-    entries: limitedByEntries,
-    tokensLimit,
+  // Filter log lines to only those at or above minLevel
+  const filteredLogLines = entry.logLines.filter((line) => {
+    if (typeof line === "object" && "level" in line) {
+      const lineLevel = line.level as LogLevel;
+      return LOG_LEVELS.indexOf(lineLevel) >= levelIndex;
+    }
+    return false;
   });
 
-  return limitedByTokens;
-}
-
-function limitEntriesByTokenBudget({
-  entries,
-  tokensLimit,
-}: {
-  entries: FunctionExecution[];
-  tokensLimit: number;
-}): FunctionExecution[] {
-  const result: FunctionExecution[] = [];
-  let tokens = 0;
-  for (const entry of entries) {
-    const entryString = JSON.stringify(entry);
-    const entryTokens = estimateTokenCount(entryString);
-    tokens += entryTokens;
-    if (tokens > tokensLimit) break;
-    result.push(entry);
+  // If no matching log lines and no matching error, exclude entry
+  if (filteredLogLines.length === 0 && !errorMatches) {
+    return null;
   }
-  return result;
-}
 
-function estimateTokenCount(entryString: string): number {
-  return entryString.length * 0.33;
+  // Return entry with filtered log lines
+  return {
+    ...entry,
+    logLines: filteredLogLines,
+  };
 }

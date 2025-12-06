@@ -1,4 +1,3 @@
-import { ToolSchema } from "@modelcontextprotocol/sdk/types";
 import { Tool } from "@modelcontextprotocol/sdk/types";
 import { RequestContext } from "../requestContext.js";
 import { ZodTypeAny, z } from "zod";
@@ -23,13 +22,11 @@ export type ConvexTool<Input extends ZodTypeAny, Output extends ZodTypeAny> = {
   ) => Promise<z.infer<Output>>;
 };
 
-type ToolInput = z.infer<(typeof ToolSchema)["shape"]["inputSchema"]>;
-
 export function mcpTool(tool: ConvexTool<ZodTypeAny, ZodTypeAny>): Tool {
   return {
     name: tool.name,
     description: tool.description,
-    inputSchema: zodToJsonSchema(tool.inputSchema) as ToolInput,
+    inputSchema: zodToJsonSchema(tool.inputSchema) as Tool["inputSchema"],
   };
 }
 

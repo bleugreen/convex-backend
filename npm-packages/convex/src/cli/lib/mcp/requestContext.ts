@@ -3,15 +3,14 @@ import { Filesystem, nodeFs } from "../../../bundler/fs.js";
 import { Ora } from "ora";
 import {
   DeploymentSelectionWithinProject,
-  deploymentSelectionWithinProjectSchema,
   DeploymentSelectionOptions,
 } from "../api.js";
-import { z } from "zod";
 
 export interface McpOptions extends DeploymentSelectionOptions {
   projectDir?: string;
   disableTools?: string;
-  dangerouslyEnableProductionDeployments?: boolean;
+  dangerouslyEnableProductionRun?: boolean;
+  deployment?: "dev" | "prod" | undefined;
 }
 
 export class RequestContext implements Context {
@@ -66,24 +65,37 @@ export class RequestContext implements Context {
     this._bigBrainAuth = auth;
   }
 
-  async decodeDeploymentSelector(encoded: string) {
-    const { projectDir, deployment } = decodeDeploymentSelector(encoded);
-    if (
-      deployment.kind === "prod" &&
-      !this.options.dangerouslyEnableProductionDeployments
-    ) {
-      return await this.crash({
+  /**
+   * Resolve deployment from argument or config defaults.
+   * @param deployment - Optional deployment type from tool argument
+   * @returns projectDir and deployment selection
+   */
+  resolveDeployment(deployment?: "dev" | "prod"): {
+    projectDir: string;
+    deployment: DeploymentSelectionWithinProject;
+  } {
+    const projectDir = this.options.projectDir ?? process.cwd();
+
+    // Priority: tool argument > config flag > default (dev)
+    const deploymentType = deployment ?? this.options.deployment ?? "dev";
+    const deploymentSelection: DeploymentSelectionWithinProject =
+      deploymentType === "prod" ? { kind: "prod" } : { kind: "ownDev" };
+
+    return { projectDir, deployment: deploymentSelection };
+  }
+
+  /**
+   * Check if production run is enabled. Call this before running mutations/actions on prod.
+   */
+  async assertProductionRunEnabled(): Promise<void> {
+    if (!this.options.dangerouslyEnableProductionRun) {
+      await this.crash({
         exitCode: 1,
         errorType: "fatal",
         printedMessage:
-          "Production deployments are disabled due to the --disable-production-deployments flag.",
+          "Running functions on production is disabled. Start the MCP server with --dangerously-enable-production-run to enable.",
       });
     }
-    return { projectDir, deployment };
-  }
-
-  get productionDeploymentsDisabled() {
-    return !this.options.dangerouslyEnableProductionDeployments;
   }
 }
 
@@ -96,29 +108,4 @@ export class RequestCrash {
   ) {
     this.printedMessage = printedMessage ?? "Unknown error";
   }
-}
-
-// Unfortunately, MCP clients don't seem to handle nested JSON objects very
-// well (even though this is within spec). To work around this, encode the
-// deployment selectors as an obfuscated string that the MCP client can
-// opaquely pass around.
-export function encodeDeploymentSelector(
-  projectDir: string,
-  deployment: DeploymentSelectionWithinProject,
-) {
-  const payload = {
-    projectDir,
-    deployment,
-  };
-  return `${deployment.kind}:${btoa(JSON.stringify(payload))}`;
-}
-
-const payloadSchema = z.object({
-  projectDir: z.string(),
-  deployment: deploymentSelectionWithinProjectSchema,
-});
-
-function decodeDeploymentSelector(encoded: string) {
-  const [_, serializedPayload] = encoded.split(":");
-  return payloadSchema.parse(JSON.parse(atob(serializedPayload)));
 }

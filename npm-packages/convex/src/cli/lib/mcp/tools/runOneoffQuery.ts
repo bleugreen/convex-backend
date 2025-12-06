@@ -4,16 +4,15 @@ import { loadSelectedDeploymentCredentials } from "../../api.js";
 import { getDeploymentSelection } from "../../deploymentSelection.js";
 
 const inputSchema = z.object({
-  deploymentSelector: z
-    .string()
-    .describe(
-      "Deployment selector (from the status tool) to run the query on.",
-    ),
   query: z
     .string()
     .describe(
       "The query to run. This should be valid JavaScript code that returns a value.",
     ),
+  deployment: z
+    .enum(["dev", "prod"])
+    .optional()
+    .describe("Target deployment: 'dev' or 'prod'. Defaults to 'dev'."),
 });
 
 const outputSchema = z.object({
@@ -58,9 +57,7 @@ export const RunOneoffQueryTool: ConvexTool<
   inputSchema,
   outputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = await ctx.decodeDeploymentSelector(
-      args.deploymentSelector,
-    );
+    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
     process.chdir(projectDir);
     const deploymentSelection = await getDeploymentSelection(ctx, ctx.options);
     const credentials = await loadSelectedDeploymentCredentials(

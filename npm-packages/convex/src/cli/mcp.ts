@@ -43,21 +43,42 @@ mcp
     `Comma separated list of tool names to disable (options: ${allToolNames.join(", ")})`,
   )
   .option(
-    "--dangerously-enable-production-deployments",
-    "DANGEROUSLY allow the MCP server to access production deployments. Defaults to false.",
+    "--dangerously-enable-production-run",
+    "DANGEROUSLY allow running mutations and actions on production deployments. Reading production data is always allowed.",
     false,
   )
-  // Deprecated option, we swapped the default. no-op.
+  .option(
+    "--deployment <deployment>",
+    "Default deployment to use: 'dev' or 'prod'. When set, tools use this deployment by default. Configure multiple MCP server instances with different deployments for easy switching.",
+  )
+  // Deprecated options, no-op.
   .addOption(
-    new Option("--disable-production-deployments")
-      .conflicts("--dangerously-enable-production-deployments")
-      .hideHelp(),
+    new Option("--disable-production-deployments").hideHelp(),
+  )
+  .addOption(
+    new Option("--dangerously-enable-production-deployments").hideHelp(),
   )
   .addDeploymentSelectionOptions(actionDescription("Run the MCP server on"))
   .action(async (options) => {
     const ctx = await oneoffContext(options);
     try {
-      const server = makeServer(options);
+      // Validate deployment option
+      if (
+        options.deployment !== undefined &&
+        options.deployment !== "dev" &&
+        options.deployment !== "prod"
+      ) {
+        await ctx.crash({
+          exitCode: 1,
+          errorType: "fatal",
+          printedMessage: `Invalid deployment option: ${options.deployment}. Must be 'dev' or 'prod'.`,
+        });
+      }
+      const mcpOptions: McpOptions = {
+        ...options,
+        deployment: options.deployment as "dev" | "prod" | undefined,
+      };
+      const server = makeServer(mcpOptions);
       const transport = new StdioServerTransport();
       await server.connect(transport);
       // Keep the process running

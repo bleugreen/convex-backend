@@ -8,11 +8,6 @@ import { Value } from "../../../../values/index.js";
 import { DefaultLogger } from "../../../../browser/logging.js";
 import { getDeploymentSelection } from "../../deploymentSelection.js";
 const inputSchema = z.object({
-  deploymentSelector: z
-    .string()
-    .describe(
-      "Deployment selector (from the status tool) to run the function on.",
-    ),
   functionName: z
     .string()
     .describe(
@@ -22,6 +17,12 @@ const inputSchema = z.object({
     .string()
     .describe(
       "The argument object to pass to the function, JSON-encoded as a string.",
+    ),
+  deployment: z
+    .enum(["dev", "prod"])
+    .optional()
+    .describe(
+      "Target deployment: 'dev' or 'prod'. Defaults to 'dev'. Running on prod requires --dangerously-enable-production-run flag.",
     ),
 });
 
@@ -44,9 +45,13 @@ export const RunTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
   inputSchema,
   outputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = await ctx.decodeDeploymentSelector(
-      args.deploymentSelector,
-    );
+    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
+
+    // Protect production from mutations
+    if (deployment.kind === "prod") {
+      await ctx.assertProductionRunEnabled();
+    }
+
     process.chdir(projectDir);
     const metadata = await getDeploymentSelection(ctx, ctx.options);
     const credentials = await loadSelectedDeploymentCredentials(

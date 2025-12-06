@@ -6,33 +6,39 @@ import { deploymentFetch } from "../../utils/utils.js";
 import { getDeploymentSelection } from "../../deploymentSelection.js";
 
 const inputSchema = z.object({
-  deploymentSelector: z
+  table: z
     .string()
+    .optional()
     .describe(
-      "Deployment selector (from the status tool) to read tables from.",
+      "Get detailed schema for a specific table. If omitted, returns summary of all tables.",
     ),
+  detail: z
+    .boolean()
+    .optional()
+    .describe("Show full schema for all tables. Default is summary mode."),
+  deployment: z
+    .enum(["dev", "prod"])
+    .optional()
+    .describe("Target deployment: 'dev' or 'prod'. Defaults to 'dev'."),
 });
 
-const outputSchema = z.object({
-  tables: z.record(
-    z.string(),
-    z.object({
-      schema: z.any().optional(),
-      inferredSchema: z.any().optional(),
-    }),
-  ),
-});
+const outputSchema = z.string().describe("Formatted table schema information");
+
+const description = `
+List tables in a Convex deployment.
+
+By default, returns a summary with table names and field/index counts.
+Use table param to get full schema for a specific table.
+Use detail=true to get full schema for all tables.
+`.trim();
 
 export const TablesTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
   name: "tables",
-  description:
-    "List all tables in a particular Convex deployment and their inferred and declared schema.",
+  description,
   inputSchema,
   outputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = await ctx.decodeDeploymentSelector(
-      args.deploymentSelector,
-    );
+    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
     process.chdir(projectDir);
     const deploymentSelection = await getDeploymentSelection(ctx, ctx.options);
     const credentials = await loadSelectedDeploymentCredentials(
@@ -65,19 +71,222 @@ export const TablesTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
       ...Object.keys(shapesResult),
       ...Object.keys(schema),
     ]);
-    const allTables = Array.from(allTablesSet);
+    let allTables = Array.from(allTablesSet);
     allTables.sort();
 
-    const result: z.infer<typeof outputSchema>["tables"] = {};
-    for (const table of allTables) {
-      result[table] = {
-        schema: schema[table],
-        inferredSchema: shapesResult[table],
-      };
+    // Filter to single table if specified
+    if (args.table) {
+      if (!allTablesSet.has(args.table)) {
+        return `Table "${args.table}" not found. Available tables: ${allTables.join(", ")}`;
+      }
+      allTables = [args.table];
     }
-    return { tables: result };
+
+    // Determine if we should show detail view
+    // Detail if: specific table requested OR detail=true
+    const showDetail = args.table !== undefined || args.detail === true;
+
+    if (!showDetail) {
+      // Summary mode: compact list with field/index counts
+      const output: string[] = [];
+      for (const tableName of allTables) {
+        const tableSchema = schema[tableName];
+        const inferredSchema = shapesResult[tableName];
+
+        const fieldCount = countFields(tableSchema?.documentType, inferredSchema);
+        const indexCount =
+          (tableSchema?.indexes?.length ?? 0) +
+          (tableSchema?.searchIndexes?.length ?? 0) +
+          (tableSchema?.vectorIndexes?.length ?? 0);
+
+        const parts = [`${tableName}`];
+        if (fieldCount > 0) parts.push(`${fieldCount} fields`);
+        if (indexCount > 0) parts.push(`${indexCount} indexes`);
+
+        output.push(parts.join(" - "));
+      }
+      return output.join("\n");
+    }
+
+    // Detail mode: full schema with fields, types, and indexes
+    const output: string[] = [];
+    for (const tableName of allTables) {
+      output.push(`## ${tableName}`);
+      const tableSchema = schema[tableName];
+      const inferredSchema = shapesResult[tableName];
+
+      // Render fields from declared or inferred schema
+      const fields = renderFields(tableSchema?.documentType, inferredSchema);
+      if (fields.length > 0) {
+        output.push(...fields.map((f) => `  ${f}`));
+      }
+
+      // Render indexes
+      if (tableSchema?.indexes && tableSchema.indexes.length > 0) {
+        output.push("Indexes:");
+        for (const idx of tableSchema.indexes) {
+          const fieldList = idx.fields?.join(", ") ?? "";
+          output.push(`  ${idx.name} [${fieldList}]`);
+        }
+      }
+
+      // Render search indexes
+      if (tableSchema?.searchIndexes && tableSchema.searchIndexes.length > 0) {
+        output.push("Search indexes:");
+        for (const idx of tableSchema.searchIndexes) {
+          const searchField = idx.searchField ?? "";
+          const filterFields = idx.filterFields?.join(", ") ?? "";
+          output.push(
+            `  ${idx.name} (search: ${searchField}${filterFields ? `, filter: ${filterFields}` : ""})`,
+          );
+        }
+      }
+
+      // Render vector indexes
+      if (tableSchema?.vectorIndexes && tableSchema.vectorIndexes.length > 0) {
+        output.push("Vector indexes:");
+        for (const idx of tableSchema.vectorIndexes) {
+          const vectorField = idx.vectorField ?? "";
+          const filterFields = idx.filterFields?.join(", ") ?? "";
+          output.push(
+            `  ${idx.name} (vector: ${vectorField}${filterFields ? `, filter: ${filterFields}` : ""})`,
+          );
+        }
+      }
+
+      output.push(""); // blank line between tables
+    }
+
+    return output.join("\n").trim();
   },
 };
+
+/**
+ * Count fields from schema/inferred types for summary view.
+ */
+function countFields(documentType: any, inferredSchema: any): number {
+  if (documentType?.type === "object" && documentType.value) {
+    return Object.keys(documentType.value).length;
+  }
+  if (inferredSchema?.type === "Object" && inferredSchema.fields) {
+    return inferredSchema.fields.length;
+  }
+  return 0;
+}
+
+/**
+ * Render fields from schema/inferred types into readable format.
+ * Returns array of strings like "fieldName: type" or "fieldName?: type"
+ */
+function renderFields(
+  documentType: any,
+  inferredSchema: any,
+): string[] {
+  const fields: string[] = [];
+
+  // Try to extract fields from declared schema first
+  if (documentType?.type === "object" && documentType.value) {
+    for (const [fieldName, fieldDef] of Object.entries<any>(documentType.value)) {
+      const isOptional = fieldDef.optional === true;
+      const typeStr = renderType(fieldDef);
+      fields.push(`${fieldName}${isOptional ? "?" : ""}: ${typeStr}`);
+    }
+    return fields;
+  }
+
+  // Fall back to inferred schema
+  if (inferredSchema?.type === "Object" && inferredSchema.fields) {
+    for (const field of inferredSchema.fields) {
+      const isOptional = field.optional === true;
+      const typeStr = renderInferredType(field.shape);
+      fields.push(`${field.fieldName}${isOptional ? "?" : ""}: ${typeStr}`);
+    }
+    return fields;
+  }
+
+  return fields;
+}
+
+/**
+ * Render a declared schema type to a readable string
+ */
+function renderType(typeDef: any): string {
+  if (!typeDef) return "unknown";
+
+  const fieldType = typeDef.fieldType ?? typeDef;
+
+  switch (fieldType.type) {
+    case "string":
+      return "string";
+    case "number":
+      return "number";
+    case "boolean":
+      return "boolean";
+    case "null":
+      return "null";
+    case "bigint":
+      return "bigint";
+    case "bytes":
+      return "bytes";
+    case "any":
+      return "any";
+    case "id":
+      return `Id<${fieldType.tableName ?? "unknown"}>`;
+    case "array":
+      return `${renderType(fieldType.value)}[]`;
+    case "object":
+      if (fieldType.value && Object.keys(fieldType.value).length > 0) {
+        const props = Object.entries<any>(fieldType.value)
+          .slice(0, 3)
+          .map(([k, v]) => `${k}: ${renderType(v)}`)
+          .join(", ");
+        const more = Object.keys(fieldType.value).length > 3 ? ", ..." : "";
+        return `{${props}${more}}`;
+      }
+      return "object";
+    case "union":
+      if (fieldType.value && fieldType.value.length <= 3) {
+        return fieldType.value.map((v: any) => renderType(v)).join(" | ");
+      }
+      return "union";
+    case "literal":
+      return JSON.stringify(fieldType.value);
+    default:
+      return fieldType.type ?? "unknown";
+  }
+}
+
+/**
+ * Render an inferred schema type to a readable string
+ */
+function renderInferredType(shape: any): string {
+  if (!shape) return "unknown";
+
+  switch (shape.type) {
+    case "String":
+      return "string";
+    case "Int64":
+    case "Float64":
+      return "number";
+    case "Boolean":
+      return "boolean";
+    case "Null":
+      return "null";
+    case "Id":
+      return `Id<${shape.tableName ?? "unknown"}>`;
+    case "Array":
+      return `${renderInferredType(shape.shape)}[]`;
+    case "Object":
+      return "object";
+    case "Union":
+      if (shape.shapes && shape.shapes.length <= 3) {
+        return shape.shapes.map((s: any) => renderInferredType(s)).join(" | ");
+      }
+      return "union";
+    default:
+      return shape.type ?? "unknown";
+  }
+}
 
 const activeSchemaEntry = z.object({
   tableName: z.string(),

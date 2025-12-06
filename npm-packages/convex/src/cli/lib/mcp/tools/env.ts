@@ -11,21 +11,13 @@ import { getDeploymentSelection } from "../../deploymentSelection.js";
 
 // List Environment Variables
 const envListInputSchema = z.object({
-  deploymentSelector: z
-    .string()
-    .describe(
-      "Deployment selector (from the status tool) to list environment variables from.",
-    ),
+  deployment: z
+    .enum(["dev", "prod"])
+    .optional()
+    .describe("Target deployment: 'dev' or 'prod'. Defaults to 'dev'."),
 });
 
-const envListOutputSchema = z.object({
-  variables: z.array(
-    z.object({
-      name: z.string(),
-      value: z.string(),
-    }),
-  ),
-});
+const envListOutputSchema = z.string();
 
 export const EnvListTool: ConvexTool<
   typeof envListInputSchema,
@@ -36,9 +28,7 @@ export const EnvListTool: ConvexTool<
   inputSchema: envListInputSchema,
   outputSchema: envListOutputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = await ctx.decodeDeploymentSelector(
-      args.deploymentSelector,
-    );
+    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
     process.chdir(projectDir);
     const deploymentSelection = await getDeploymentSelection(ctx, ctx.options);
     const credentials = await loadSelectedDeploymentCredentials(
@@ -53,20 +43,24 @@ export const EnvListTool: ConvexTool<
       componentPath: undefined,
       args: {},
     })) as EnvVar[];
-    return { variables };
+
+    if (variables.length === 0) {
+      return "No environment variables configured.";
+    }
+
+    return variables.map((v) => `${v.name}=${v.value}`).join("\n");
   },
 };
 
 // Get Environment Variable
 const envGetInputSchema = z.object({
-  deploymentSelector: z
-    .string()
-    .describe(
-      "Deployment selector (from the status tool) to get environment variable from.",
-    ),
   name: z
     .string()
     .describe("The name of the environment variable to retrieve."),
+  deployment: z
+    .enum(["dev", "prod"])
+    .optional()
+    .describe("Target deployment: 'dev' or 'prod'. Defaults to 'dev'."),
 });
 
 const envGetOutputSchema = z.object({
@@ -83,9 +77,7 @@ export const EnvGetTool: ConvexTool<
   inputSchema: envGetInputSchema,
   outputSchema: envGetOutputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = await ctx.decodeDeploymentSelector(
-      args.deploymentSelector,
-    );
+    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
     process.chdir(projectDir);
     const deploymentSelection = await getDeploymentSelection(ctx, ctx.options);
     const credentials = await loadSelectedDeploymentCredentials(
@@ -106,13 +98,14 @@ export const EnvGetTool: ConvexTool<
 
 // Set Environment Variable
 const envSetInputSchema = z.object({
-  deploymentSelector: z
-    .string()
-    .describe(
-      "Deployment selector (from the status tool) to set environment variable on.",
-    ),
   name: z.string().describe("The name of the environment variable to set."),
   value: z.string().describe("The value to set for the environment variable."),
+  deployment: z
+    .enum(["dev", "prod"])
+    .optional()
+    .describe(
+      "Target deployment: 'dev' or 'prod'. Defaults to 'dev'. Modifying prod requires --dangerously-enable-production-run flag.",
+    ),
 });
 
 const envSetOutputSchema = z.object({
@@ -128,9 +121,13 @@ export const EnvSetTool: ConvexTool<
   inputSchema: envSetInputSchema,
   outputSchema: envSetOutputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = await ctx.decodeDeploymentSelector(
-      args.deploymentSelector,
-    );
+    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
+
+    // Protect production from modifications
+    if (deployment.kind === "prod") {
+      await ctx.assertProductionRunEnabled();
+    }
+
     process.chdir(projectDir);
     const deploymentSelection = await getDeploymentSelection(ctx, ctx.options);
     const credentials = await loadSelectedDeploymentCredentials(
@@ -150,12 +147,13 @@ export const EnvSetTool: ConvexTool<
 
 // Remove Environment Variable
 const envRemoveInputSchema = z.object({
-  deploymentSelector: z
-    .string()
-    .describe(
-      "Deployment selector (from the status tool) to remove environment variable from.",
-    ),
   name: z.string().describe("The name of the environment variable to remove."),
+  deployment: z
+    .enum(["dev", "prod"])
+    .optional()
+    .describe(
+      "Target deployment: 'dev' or 'prod'. Defaults to 'dev'. Modifying prod requires --dangerously-enable-production-run flag.",
+    ),
 });
 
 const envRemoveOutputSchema = z.object({
@@ -171,9 +169,13 @@ export const EnvRemoveTool: ConvexTool<
   inputSchema: envRemoveInputSchema,
   outputSchema: envRemoveOutputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = await ctx.decodeDeploymentSelector(
-      args.deploymentSelector,
-    );
+    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
+
+    // Protect production from modifications
+    if (deployment.kind === "prod") {
+      await ctx.assertProductionRunEnabled();
+    }
+
     process.chdir(projectDir);
     const deploymentSelection = await getDeploymentSelection(ctx, ctx.options);
     const credentials = await loadSelectedDeploymentCredentials(
