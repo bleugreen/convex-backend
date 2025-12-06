@@ -1,4 +1,4 @@
-import { RequestContext } from "../requestContext.js";
+import { RequestContext, RequestCrash } from "../requestContext.js";
 import { loadSelectedDeploymentCredentials } from "../../api.js";
 import { z } from "zod";
 import { ConvexTool } from "./index.js";
@@ -90,8 +90,12 @@ export const StatusTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
             ),
           });
         }
-      } catch {
-        // No prod deployment available
+      } catch (error) {
+        // Only swallow RequestCrash errors (expected when no prod deployment exists).
+        // Re-throw unexpected errors (network issues, etc.) so they're not silently hidden.
+        if (!(error instanceof RequestCrash)) {
+          throw error;
+        }
       }
     }
 

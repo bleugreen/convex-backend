@@ -10,6 +10,12 @@ const LOG_LEVELS = ["DEBUG", "LOG", "INFO", "WARN", "ERROR"] as const;
 type LogLevel = (typeof LOG_LEVELS)[number];
 
 const inputSchema = z.object({
+  cursor: z
+    .number()
+    .optional()
+    .describe(
+      "Cursor from a previous response to fetch only new logs. Omit to fetch the full log buffer.",
+    ),
   limit: z
     .number()
     .int()
@@ -72,8 +78,9 @@ export const LogsTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
       adminKey: credentials.adminKey,
     });
 
-    // Fetch the full log buffer
-    const response = await fetch(`/api/stream_function_logs?cursor=0`, {
+    // Fetch logs from cursor (0 = full buffer, or from previous newCursor)
+    const cursor = args.cursor ?? 0;
+    const response = await fetch(`/api/stream_function_logs?cursor=${cursor}`, {
       method: "GET",
     });
 

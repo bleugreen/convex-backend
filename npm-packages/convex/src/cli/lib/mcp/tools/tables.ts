@@ -4,6 +4,10 @@ import { loadSelectedDeploymentCredentials } from "../../api.js";
 import { runSystemQuery } from "../../run.js";
 import { deploymentFetch } from "../../utils/utils.js";
 import { getDeploymentSelection } from "../../deploymentSelection.js";
+import {
+  renderValidatorType,
+  renderInferredType,
+} from "./typeRendering.js";
 
 const inputSchema = z.object({
   table: z
@@ -178,17 +182,18 @@ function countFields(documentType: any, inferredSchema: any): number {
  * Render fields from schema/inferred types into readable format.
  * Returns array of strings like "fieldName: type" or "fieldName?: type"
  */
-function renderFields(
-  documentType: any,
-  inferredSchema: any,
-): string[] {
+function renderFields(documentType: any, inferredSchema: any): string[] {
   const fields: string[] = [];
 
   // Try to extract fields from declared schema first
   if (documentType?.type === "object" && documentType.value) {
-    for (const [fieldName, fieldDef] of Object.entries<any>(documentType.value)) {
+    for (const [fieldName, fieldDef] of Object.entries<any>(
+      documentType.value,
+    )) {
       const isOptional = fieldDef.optional === true;
-      const typeStr = renderType(fieldDef);
+      const typeStr = renderValidatorType(fieldDef, {
+        showObjectFieldTypes: true,
+      });
       fields.push(`${fieldName}${isOptional ? "?" : ""}: ${typeStr}`);
     }
     return fields;
@@ -205,87 +210,6 @@ function renderFields(
   }
 
   return fields;
-}
-
-/**
- * Render a declared schema type to a readable string
- */
-function renderType(typeDef: any): string {
-  if (!typeDef) return "unknown";
-
-  const fieldType = typeDef.fieldType ?? typeDef;
-
-  switch (fieldType.type) {
-    case "string":
-      return "string";
-    case "number":
-      return "number";
-    case "boolean":
-      return "boolean";
-    case "null":
-      return "null";
-    case "bigint":
-      return "bigint";
-    case "bytes":
-      return "bytes";
-    case "any":
-      return "any";
-    case "id":
-      return `Id<${fieldType.tableName ?? "unknown"}>`;
-    case "array":
-      return `${renderType(fieldType.value)}[]`;
-    case "object":
-      if (fieldType.value && Object.keys(fieldType.value).length > 0) {
-        const props = Object.entries<any>(fieldType.value)
-          .slice(0, 3)
-          .map(([k, v]) => `${k}: ${renderType(v)}`)
-          .join(", ");
-        const more = Object.keys(fieldType.value).length > 3 ? ", ..." : "";
-        return `{${props}${more}}`;
-      }
-      return "object";
-    case "union":
-      if (fieldType.value && fieldType.value.length <= 3) {
-        return fieldType.value.map((v: any) => renderType(v)).join(" | ");
-      }
-      return "union";
-    case "literal":
-      return JSON.stringify(fieldType.value);
-    default:
-      return fieldType.type ?? "unknown";
-  }
-}
-
-/**
- * Render an inferred schema type to a readable string
- */
-function renderInferredType(shape: any): string {
-  if (!shape) return "unknown";
-
-  switch (shape.type) {
-    case "String":
-      return "string";
-    case "Int64":
-    case "Float64":
-      return "number";
-    case "Boolean":
-      return "boolean";
-    case "Null":
-      return "null";
-    case "Id":
-      return `Id<${shape.tableName ?? "unknown"}>`;
-    case "Array":
-      return `${renderInferredType(shape.shape)}[]`;
-    case "Object":
-      return "object";
-    case "Union":
-      if (shape.shapes && shape.shapes.length <= 3) {
-        return shape.shapes.map((s: any) => renderInferredType(s)).join(" | ");
-      }
-      return "union";
-    default:
-      return shape.type ?? "unknown";
-  }
 }
 
 const activeSchemaEntry = z.object({

@@ -3,6 +3,7 @@ import { ConvexTool } from "./index.js";
 import { loadSelectedDeploymentCredentials } from "../../api.js";
 import { runSystemQuery } from "../../run.js";
 import { getDeploymentSelection } from "../../deploymentSelection.js";
+import { renderValidatorType } from "./typeRendering.js";
 
 const inputSchema = z.object({
   file: z
@@ -93,7 +94,11 @@ export const FunctionSpecTool: ConvexTool<
       try {
         patternFilter = new RegExp(args.pattern);
       } catch {
-        return `Invalid regex pattern: ${args.pattern}`;
+        return await ctx.crash({
+          exitCode: 1,
+          errorType: "fatal",
+          printedMessage: `Invalid regex pattern: ${args.pattern}`,
+        });
       }
     }
 
@@ -209,7 +214,7 @@ function renderArgs(argsValidator: any): string {
     const args: string[] = [];
     for (const [name, validator] of Object.entries<any>(argsValidator.value)) {
       const isOptional = validator.optional === true;
-      const typeStr = renderValidatorType(validator);
+      const typeStr = renderValidatorType(validator, { unknownTable: "?" });
       args.push(`${name}${isOptional ? "?" : ""}: ${typeStr}`);
     }
     return args.join(", ");
@@ -220,48 +225,5 @@ function renderArgs(argsValidator: any): string {
 
 function renderReturnType(returnValidator: any): string {
   if (!returnValidator) return "any";
-  return renderValidatorType(returnValidator);
-}
-
-function renderValidatorType(validator: any): string {
-  if (!validator) return "any";
-
-  const v = validator.fieldType ?? validator;
-
-  switch (v.type) {
-    case "string":
-      return "string";
-    case "number":
-      return "number";
-    case "boolean":
-      return "boolean";
-    case "null":
-      return "null";
-    case "bigint":
-      return "bigint";
-    case "bytes":
-      return "bytes";
-    case "any":
-      return "any";
-    case "id":
-      return `Id<${v.tableName ?? "?"}>`;
-    case "array":
-      return `${renderValidatorType(v.value)}[]`;
-    case "object":
-      if (v.value && Object.keys(v.value).length > 0) {
-        const fields = Object.keys(v.value).slice(0, 3);
-        const more = Object.keys(v.value).length > 3 ? ", ..." : "";
-        return `{${fields.join(", ")}${more}}`;
-      }
-      return "object";
-    case "union":
-      if (v.value && v.value.length <= 3) {
-        return v.value.map((u: any) => renderValidatorType(u)).join(" | ");
-      }
-      return "union";
-    case "literal":
-      return JSON.stringify(v.value);
-    default:
-      return v.type ?? "any";
-  }
+  return renderValidatorType(returnValidator, { unknownTable: "?" });
 }

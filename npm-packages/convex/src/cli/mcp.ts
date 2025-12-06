@@ -62,6 +62,23 @@ mcp
   .action(async (options) => {
     const ctx = await oneoffContext(options);
     try {
+      // Handle deprecated options with warnings and backward compatibility
+      const opts = options as Record<string, unknown>;
+      if (opts.disableProductionDeployments) {
+        // eslint-disable-next-line no-console
+        console.error(
+          "Warning: --disable-production-deployments is deprecated and has no effect. " +
+            "Production read access is now always enabled. Use --dangerously-enable-production-run to enable mutations/actions on production.",
+        );
+      }
+      if (opts.dangerouslyEnableProductionDeployments) {
+        // eslint-disable-next-line no-console
+        console.error(
+          "Warning: --dangerously-enable-production-deployments is deprecated. " +
+            "Use --dangerously-enable-production-run instead.",
+        );
+      }
+
       // Validate deployment option
       if (
         options.deployment !== undefined &&
@@ -77,6 +94,10 @@ mcp
       const mcpOptions: McpOptions = {
         ...options,
         deployment: options.deployment as "dev" | "prod" | undefined,
+        // Backward compatibility: map old flag to new behavior
+        dangerouslyEnableProductionRun:
+          options.dangerouslyEnableProductionRun ||
+          !!opts.dangerouslyEnableProductionDeployments,
       };
       const server = makeServer(mcpOptions);
       const transport = new StdioServerTransport();

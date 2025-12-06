@@ -11,7 +11,7 @@ let nextCursorId = 1;
 const MAX_CACHED_CURSORS = 100;
 
 function storeCursor(cursor: string): number {
-  // Simple LRU: if cache is full, remove oldest entries
+  // FIFO eviction: if cache is full, remove the oldest entry
   if (cursorCache.size >= MAX_CACHED_CURSORS) {
     const oldestKey = cursorCache.keys().next().value;
     if (oldestKey !== undefined) {
@@ -39,6 +39,8 @@ const inputSchema = z.object({
     .describe("Cursor ID from a previous response to fetch the next page."),
   limit: z
     .number()
+    .int()
+    .positive()
     .max(1000)
     .optional()
     .describe("Maximum results to return. Defaults to 100."),

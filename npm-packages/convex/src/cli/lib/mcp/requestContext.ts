@@ -101,11 +101,15 @@ export class RequestContext implements Context {
 
 export class RequestCrash {
   printedMessage: string;
+  exitCode: number;
+  errorType: ErrorType | undefined;
   constructor(
-    private exitCode: number,
-    private errorType: ErrorType | undefined,
+    exitCode: number,
+    errorType: ErrorType | undefined,
     printedMessage: string | null,
   ) {
+    this.exitCode = exitCode;
+    this.errorType = errorType;
     this.printedMessage = printedMessage ?? "Unknown error";
   }
 }

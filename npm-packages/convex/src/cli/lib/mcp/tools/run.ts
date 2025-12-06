@@ -1,12 +1,32 @@
 import { z } from "zod";
 import { ConvexTool } from "./index.js";
 import { loadSelectedDeploymentCredentials } from "../../api.js";
-import { parseArgs, parseFunctionName } from "../../run.js";
+import { parseArgs, parseFunctionName, runSystemQuery } from "../../run.js";
 import { readProjectConfig } from "../../config.js";
-import { ConvexHttpClient } from "../../../../browser/index.js";
+import {
+  ConvexHttpClient,
+  UserIdentityAttributes,
+} from "../../../../browser/index.js";
 import { Value } from "../../../../values/index.js";
 import { DefaultLogger } from "../../../../browser/logging.js";
 import { getDeploymentSelection } from "../../deploymentSelection.js";
+
+type FunctionType = "Query" | "Mutation" | "Action" | "HttpAction";
+
+const userSchema = z
+  .object({
+    subject: z.string().describe("User identifier from the identity provider"),
+    issuer: z
+      .string()
+      .optional()
+      .describe(
+        "Hostname of the identity provider (defaults to 'https://<deployment>.convex.site')",
+      ),
+  })
+  .describe(
+    "Run the function as this user (for testing authenticated functions)",
+  );
+
 const inputSchema = z.object({
   functionName: z
     .string()
@@ -18,6 +38,7 @@ const inputSchema = z.object({
     .describe(
       "The argument object to pass to the function, JSON-encoded as a string.",
     ),
+  user: userSchema.optional(),
   deployment: z
     .enum(["dev", "prod"])
     .optional()
@@ -47,11 +68,6 @@ export const RunTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
   handler: async (ctx, args) => {
     const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
 
-    // Protect production from mutations
-    if (deployment.kind === "prod") {
-      await ctx.assertProductionRunEnabled();
-    }
-
     process.chdir(projectDir);
     const metadata = await getDeploymentSelection(ctx, ctx.options);
     const credentials = await loadSelectedDeploymentCredentials(
@@ -66,6 +82,20 @@ export const RunTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
       args.functionName,
       projectConfig.functions,
     );
+
+    // Only block mutations and actions on production, not queries
+    if (deployment.kind === "prod") {
+      const functionType = await getFunctionType(
+        ctx,
+        credentials.url,
+        credentials.adminKey,
+        parsedFunctionName,
+      );
+      if (functionType !== "Query") {
+        await ctx.assertProductionRunEnabled();
+      }
+    }
+
     const logger = new DefaultLogger({ verbose: true });
     const logLines: string[] = [];
     logger.addLogLineListener((level, ...args) => {
@@ -74,7 +104,20 @@ export const RunTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
     const client = new ConvexHttpClient(credentials.url, {
       logger: logger,
     });
-    client.setAdminAuth(credentials.adminKey);
+
+    // Build user identity if provided
+    let identity: UserIdentityAttributes | undefined;
+    if (args.user) {
+      // Default issuer to the deployment's site URL
+      const defaultIssuer = credentials.deploymentFields?.deploymentName
+        ? `https://${credentials.deploymentFields.deploymentName}.convex.site`
+        : "https://convex.test";
+      identity = {
+        subject: args.user.subject,
+        issuer: args.user.issuer ?? defaultIssuer,
+      };
+    }
+    client.setAdminAuth(credentials.adminKey, identity);
     let result: Value;
     try {
       result = await client.function(parsedFunctionName, undefined, parsedArgs);
@@ -91,3 +134,31 @@ export const RunTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
     };
   },
 };
+
+async function getFunctionType(
+  ctx: Parameters<typeof runSystemQuery>[0],
+  deploymentUrl: string,
+  adminKey: string,
+  functionName: string,
+): Promise<FunctionType | null> {
+  const functions = (await runSystemQuery(ctx, {
+    deploymentUrl,
+    adminKey,
+    functionName: "_system/cli/modules:apiSpec",
+    componentPath: undefined,
+    args: {},
+  })) as (
+    | { functionType: FunctionType; identifier: string }
+    | { functionType: "HttpAction" }
+  )[];
+
+  for (const fn of functions) {
+    if (fn.functionType === "HttpAction") continue;
+    if (fn.identifier === functionName) {
+      return fn.functionType;
+    }
+  }
+
+  // Function not found - let execution proceed and fail with proper error
+  return null;
+}
