@@ -43,7 +43,7 @@ const inputSchema = z.object({
     .enum(["dev", "prod"])
     .optional()
     .describe(
-      "Target deployment: 'dev' or 'prod'. Defaults to 'dev'. Running on prod requires --dangerously-enable-production-run flag.",
+      "Target deployment: 'dev' or 'prod'. Defaults to 'dev'. Running mutations/actions on prod requires --dangerously-enable-production-mutations flag.",
     ),
 });
 
@@ -92,7 +92,7 @@ export const RunTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
         parsedFunctionName,
       );
       if (functionType !== "Query") {
-        await ctx.assertProductionRunEnabled();
+        await ctx.assertProductionMutationsEnabled();
       }
     }
 

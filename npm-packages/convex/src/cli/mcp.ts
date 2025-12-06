@@ -43,7 +43,7 @@ mcp
     `Comma separated list of tool names to disable (options: ${allToolNames.join(", ")})`,
   )
   .option(
-    "--dangerously-enable-production-run",
+    "--dangerously-enable-production-mutations",
     "DANGEROUSLY allow running mutations and actions on production deployments. Reading production data is always allowed.",
     false,
   )
@@ -68,14 +68,14 @@ mcp
         // eslint-disable-next-line no-console
         console.error(
           "Warning: --disable-production-deployments is deprecated and has no effect. " +
-            "Production read access is now always enabled. Use --dangerously-enable-production-run to enable mutations/actions on production.",
+            "Production read access is now always enabled. Use --dangerously-enable-production-mutations to enable mutations/actions on production.",
         );
       }
       if (opts.dangerouslyEnableProductionDeployments) {
         // eslint-disable-next-line no-console
         console.error(
           "Warning: --dangerously-enable-production-deployments is deprecated. " +
-            "Use --dangerously-enable-production-run instead.",
+            "Use --dangerously-enable-production-mutations instead.",
         );
       }
 
@@ -95,8 +95,8 @@ mcp
         ...options,
         deployment: options.deployment as "dev" | "prod" | undefined,
         // Backward compatibility: map old flag to new behavior
-        dangerouslyEnableProductionRun:
-          options.dangerouslyEnableProductionRun ||
+        dangerouslyEnableProductionMutations:
+          options.dangerouslyEnableProductionMutations ||
           !!opts.dangerouslyEnableProductionDeployments,
       };
       const server = makeServer(mcpOptions);

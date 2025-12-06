@@ -16,7 +16,7 @@ const outputSchema = z.object({
       dashboardUrl: z.string().optional(),
     }),
   ),
-  productionRunEnabled: z.boolean(),
+  productionMutationsEnabled: z.boolean(),
 });
 
 const description = `
@@ -27,7 +27,7 @@ URLs and dashboard links, and whether production mutations are enabled.
 
 Use this first to understand what deployments are available. By default, tools
 operate on the dev deployment. Pass deployment="prod" to other tools to access
-production data (read-only unless --dangerously-enable-production-run is set).
+production data (read-only unless --dangerously-enable-production-mutations is set).
 `.trim();
 
 export const StatusTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
@@ -102,7 +102,7 @@ export const StatusTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
     return {
       projectDir,
       deployments,
-      productionRunEnabled: !!ctx.options.dangerouslyEnableProductionRun,
+      productionMutationsEnabled: !!ctx.options.dangerouslyEnableProductionMutations,
     };
   },
 };

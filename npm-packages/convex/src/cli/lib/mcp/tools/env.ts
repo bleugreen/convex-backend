@@ -104,7 +104,7 @@ const envSetInputSchema = z.object({
     .enum(["dev", "prod"])
     .optional()
     .describe(
-      "Target deployment: 'dev' or 'prod'. Defaults to 'dev'. Modifying prod requires --dangerously-enable-production-run flag.",
+      "Target deployment: 'dev' or 'prod'. Defaults to 'dev'. Modifying prod requires --dangerously-enable-production-mutations flag.",
     ),
 });
 
@@ -125,7 +125,7 @@ export const EnvSetTool: ConvexTool<
 
     // Protect production from modifications
     if (deployment.kind === "prod") {
-      await ctx.assertProductionRunEnabled();
+      await ctx.assertProductionMutationsEnabled();
     }
 
     process.chdir(projectDir);
@@ -152,7 +152,7 @@ const envRemoveInputSchema = z.object({
     .enum(["dev", "prod"])
     .optional()
     .describe(
-      "Target deployment: 'dev' or 'prod'. Defaults to 'dev'. Modifying prod requires --dangerously-enable-production-run flag.",
+      "Target deployment: 'dev' or 'prod'. Defaults to 'dev'. Modifying prod requires --dangerously-enable-production-mutations flag.",
     ),
 });
 
@@ -173,7 +173,7 @@ export const EnvRemoveTool: ConvexTool<
 
     // Protect production from modifications
     if (deployment.kind === "prod") {
-      await ctx.assertProductionRunEnabled();
+      await ctx.assertProductionMutationsEnabled();
     }
 
     process.chdir(projectDir);

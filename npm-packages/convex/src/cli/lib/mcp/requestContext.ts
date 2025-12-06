@@ -9,7 +9,7 @@ import {
 export interface McpOptions extends DeploymentSelectionOptions {
   projectDir?: string;
   disableTools?: string;
-  dangerouslyEnableProductionRun?: boolean;
+  dangerouslyEnableProductionMutations?: boolean;
   deployment?: "dev" | "prod" | undefined;
 }
 
@@ -85,15 +85,15 @@ export class RequestContext implements Context {
   }
 
   /**
-   * Check if production run is enabled. Call this before running mutations/actions on prod.
+   * Check if production mutations are enabled. Call this before running mutations/actions on prod.
    */
-  async assertProductionRunEnabled(): Promise<void> {
-    if (!this.options.dangerouslyEnableProductionRun) {
+  async assertProductionMutationsEnabled(): Promise<void> {
+    if (!this.options.dangerouslyEnableProductionMutations) {
       await this.crash({
         exitCode: 1,
         errorType: "fatal",
         printedMessage:
-          "Running functions on production is disabled. Start the MCP server with --dangerously-enable-production-run to enable.",
+          "Running mutations on production is disabled. Start the MCP server with --dangerously-enable-production-mutations to enable.",
       });
     }
   }
