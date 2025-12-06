@@ -28,7 +28,8 @@ export const EnvListTool: ConvexTool<
   inputSchema: envListInputSchema,
   outputSchema: envListOutputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
+    const { projectDir, deployment } =
+      await ctx.resolveDeploymentWithAccessCheck(args.deployment);
     process.chdir(projectDir);
     const deploymentSelection = await getDeploymentSelection(ctx, ctx.options);
     const credentials = await loadSelectedDeploymentCredentials(
@@ -77,7 +78,8 @@ export const EnvGetTool: ConvexTool<
   inputSchema: envGetInputSchema,
   outputSchema: envGetOutputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
+    const { projectDir, deployment } =
+      await ctx.resolveDeploymentWithAccessCheck(args.deployment);
     process.chdir(projectDir);
     const deploymentSelection = await getDeploymentSelection(ctx, ctx.options);
     const credentials = await loadSelectedDeploymentCredentials(
@@ -121,9 +123,10 @@ export const EnvSetTool: ConvexTool<
   inputSchema: envSetInputSchema,
   outputSchema: envSetOutputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
+    const { projectDir, deployment } =
+      await ctx.resolveDeploymentWithAccessCheck(args.deployment);
 
-    // Protect production from modifications
+    // Mutations on production require additional opt-in
     if (deployment.kind === "prod") {
       await ctx.assertProductionMutationsEnabled();
     }
@@ -169,9 +172,10 @@ export const EnvRemoveTool: ConvexTool<
   inputSchema: envRemoveInputSchema,
   outputSchema: envRemoveOutputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
+    const { projectDir, deployment } =
+      await ctx.resolveDeploymentWithAccessCheck(args.deployment);
 
-    // Protect production from modifications
+    // Mutations on production require additional opt-in
     if (deployment.kind === "prod") {
       await ctx.assertProductionMutationsEnabled();
     }

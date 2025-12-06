@@ -43,18 +43,21 @@ mcp
     `Comma separated list of tool names to disable (options: ${allToolNames.join(", ")})`,
   )
   .option(
+    "--disable-production",
+    "Disable all production access (reads and writes). By default, production reads are allowed.",
+    false,
+  )
+  .option(
     "--dangerously-enable-production-mutations",
-    "DANGEROUSLY allow running mutations and actions on production deployments. Reading production data is always allowed.",
+    "DANGEROUSLY allow running mutations and actions on production deployments. Reading production data is always allowed unless --disable-production is set.",
     false,
   )
   .option(
     "--deployment <deployment>",
     "Default deployment to use: 'dev' or 'prod'. When set, tools use this deployment by default. Configure multiple MCP server instances with different deployments for easy switching.",
   )
-  // Deprecated options, no-op.
-  .addOption(
-    new Option("--disable-production-deployments").hideHelp(),
-  )
+  // Deprecated options - map to new behavior
+  .addOption(new Option("--disable-production-deployments").hideHelp())
   .addOption(
     new Option("--dangerously-enable-production-deployments").hideHelp(),
   )
@@ -67,8 +70,8 @@ mcp
       if (opts.disableProductionDeployments) {
         // eslint-disable-next-line no-console
         console.error(
-          "Warning: --disable-production-deployments is deprecated and has no effect. " +
-            "Production read access is now always enabled. Use --dangerously-enable-production-mutations to enable mutations/actions on production.",
+          "Warning: --disable-production-deployments is deprecated. " +
+            "Use --disable-production instead.",
         );
       }
       if (opts.dangerouslyEnableProductionDeployments) {
@@ -94,7 +97,9 @@ mcp
       const mcpOptions: McpOptions = {
         ...options,
         deployment: options.deployment as "dev" | "prod" | undefined,
-        // Backward compatibility: map old flag to new behavior
+        // Backward compatibility: map old flags to new behavior
+        disableProduction:
+          options.disableProduction || !!opts.disableProductionDeployments,
         dangerouslyEnableProductionMutations:
           options.dangerouslyEnableProductionMutations ||
           !!opts.dangerouslyEnableProductionDeployments,

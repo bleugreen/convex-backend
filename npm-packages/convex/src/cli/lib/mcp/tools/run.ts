@@ -66,7 +66,8 @@ export const RunTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
   inputSchema,
   outputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
+    const { projectDir, deployment } =
+      await ctx.resolveDeploymentWithAccessCheck(args.deployment);
 
     process.chdir(projectDir);
     const metadata = await getDeploymentSelection(ctx, ctx.options);
@@ -83,7 +84,7 @@ export const RunTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
       projectConfig.functions,
     );
 
-    // Only block mutations and actions on production, not queries
+    // For prod, mutations/actions require additional opt-in beyond read access
     if (deployment.kind === "prod") {
       const functionType = await getFunctionType(
         ctx,

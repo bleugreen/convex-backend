@@ -9,6 +9,7 @@ import {
 export interface McpOptions extends DeploymentSelectionOptions {
   projectDir?: string;
   disableTools?: string;
+  disableProduction?: boolean;
   dangerouslyEnableProductionMutations?: boolean;
   deployment?: "dev" | "prod" | undefined;
 }
@@ -67,6 +68,7 @@ export class RequestContext implements Context {
 
   /**
    * Resolve deployment from argument or config defaults.
+   * Does NOT check production access - caller must check if needed.
    * @param deployment - Optional deployment type from tool argument
    * @returns projectDir and deployment selection
    */
@@ -85,9 +87,43 @@ export class RequestContext implements Context {
   }
 
   /**
+   * Resolve deployment and check production access if targeting prod.
+   * Use this for tools that read production data.
+   * @param deployment - Optional deployment type from tool argument
+   * @returns projectDir and deployment selection
+   */
+  async resolveDeploymentWithAccessCheck(deployment?: "dev" | "prod"): Promise<{
+    projectDir: string;
+    deployment: DeploymentSelectionWithinProject;
+  }> {
+    const result = this.resolveDeployment(deployment);
+    if (result.deployment.kind === "prod") {
+      await this.assertProductionAccessEnabled();
+    }
+    return result;
+  }
+
+  /**
+   * Check if production access is enabled. Call this before any prod operations.
+   */
+  async assertProductionAccessEnabled(): Promise<void> {
+    if (this.options.disableProduction) {
+      await this.crash({
+        exitCode: 1,
+        errorType: "fatal",
+        printedMessage:
+          "Production access is disabled. Remove --disable-production to enable read access.",
+      });
+    }
+  }
+
+  /**
    * Check if production mutations are enabled. Call this before running mutations/actions on prod.
    */
   async assertProductionMutationsEnabled(): Promise<void> {
+    // First check if production access is enabled at all
+    await this.assertProductionAccessEnabled();
+
     if (!this.options.dangerouslyEnableProductionMutations) {
       await this.crash({
         exitCode: 1,

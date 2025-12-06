@@ -42,7 +42,8 @@ export const TablesTool: ConvexTool<typeof inputSchema, typeof outputSchema> = {
   inputSchema,
   outputSchema,
   handler: async (ctx, args) => {
-    const { projectDir, deployment } = ctx.resolveDeployment(args.deployment);
+    const { projectDir, deployment } =
+      await ctx.resolveDeploymentWithAccessCheck(args.deployment);
     process.chdir(projectDir);
     const deploymentSelection = await getDeploymentSelection(ctx, ctx.options);
     const credentials = await loadSelectedDeploymentCredentials(
